@@ -118,15 +118,11 @@ neural_posterior = utils.posterior_nn(
 
 inference = SNPE(prior=prior, density_estimator=neural_posterior)
 
-a, b = simulate_for_sbi(simulator_wrapper, prior, num_simulations=300000)
-
-inference = inference.append_simulations(a, b)
-
-density_estimator = inference.train()
+density_estimator = torch.load('./test_save')
 
 posterior = inference.build_posterior(density_estimator)
 
-posterior_samples = posterior.sample((10000,), x=observation)
+posterior_samples = posterior.sample((50000,), x=observation)
 
 plt.plot(observation)
 plt.savefig("ou_1_1_1.png")
@@ -140,7 +136,7 @@ post_graph = analysis.pairplot(
     points_offdiag={"markersize": 6},
     figsize=(6, 6)
 )
-#plt.savefig("plt_graph_111_summary_3.png")
+plt.savefig("plt_graph_111_summary_test_load2.png")
 
 # List the methods of the object using dir()
 methods = dir(density_estimator)
