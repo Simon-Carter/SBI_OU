@@ -98,11 +98,36 @@ def ou_process(params):
 
 
 
+# Implement Known summary Statistics for ann OU process
+
+def OU_summary(data):
+    if len(data) == 0:
+        raise ValueError("Input array is empty")
+
+    # Calculate the sample mean
+    mean = np.mean(data)
+
+    # Calculate the sample variance
+    variance = np.var(data, ddof=1)
+
+    # Calculate the sample covariance matrix
+    autocorrelation_at_lag1 = np.corrcoef(data[:-1], data[1:])[0, 1]
+
+    #to deal with shorter samples
+    initial_value = data[0]
+
+    return [mean, variance, autocorrelation_at_lag1, initial_value]
+
+
+#implement new simulator with handpicked summary statistics
+def OU_summary_hand(params):
+    return OU_summary(ou_process(params))
+
+# Test Stuff to make sure these functions are working
+test_summary = OU_summary_hand(ou_process([10,11]))
 
 
 ### SBI implementation/training
-
-
 
 ## Defining the prior
 num_dim = 2
@@ -110,30 +135,35 @@ prior = utils.BoxUniform(low=0 * torch.ones(num_dim), high=5 * torch.ones(num_di
 
 
 # make a SBI-wrapper on the simulator object for compatibility
-simulator_wrapper, prior = prepare_for_sbi(ou_process, prior)
+simulator_wrapper, prior = prepare_for_sbi(OU_summary_hand, prior)
 
 
 #generate an observation
-observation = ou_process([1, 1])
+observation = OU_summary_hand([1, 1])
 
 # For teting purposes, check if our simulator is consistent with expectations
 plt.plot(observation)
 plt.savefig("ou_1_1_1.png")
 
 
-
+'''
 #define the arhitecture of the conditional neural density estimato
 neural_posterior = utils.posterior_nn(
     model="maf", embedding_net=embedding_net, hidden_features=10, num_transforms=2
 )
+'''
 
+#define the arhitecture of the conditional neural density estimato
+neural_posterior = utils.posterior_nn(
+    model="maf", hidden_features=10, num_transforms=2
+)
 
 #Create the inference object
 inference = SNPE(prior=prior, density_estimator=neural_posterior)
 
 
 #Sample the parameters from out simulator
-a, b = simulate_for_sbi(simulator_wrapper, prior, num_simulations=300000)
+a, b = simulate_for_sbi(simulator_wrapper, prior, num_simulations=50000)
 
 
 #Give the simulator our parameters
@@ -144,6 +174,8 @@ density_estimator = inference.train()
 
 #save our model
 torch.save(density_estimator, './Models/test_save')
+torch.save(embedding_net, './Models/embedding_save')
+
 
 #generate the posterior from our neural density estimator
 posterior = inference.build_posterior(density_estimator)
@@ -162,7 +194,7 @@ post_graph = analysis.pairplot(
     points_offdiag={"markersize": 6},
     figsize=(6, 6)
 )
-#plt.savefig("plt_graph_111_summary_3.png")
+plt.savefig("plt_graph_111_summary_3_nonn.png")
 
 ''' Debugging Code
 # List the methods of the object using dir()
