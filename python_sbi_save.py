@@ -90,6 +90,7 @@ def ou_process(params):
     #    X[:,t+1] = X[:,t] + kappa*(theta - X[:,t])*dt + sigma * np.sqrt(dt) * W[:,t]
 
     std_dt = np.sqrt(sigma**2 / (2 * kappa) * (1 - np.exp(-2 * kappa * dt)))
+    std_dt = np.sqrt(sigma**2 / (2 * kappa) * (1 - np.exp(-2 * kappa * dt)))
     for t in range(0, N - 1):
         X[:, t + 1] = theta + np.exp(-kappa * dt) * (X[:, t] - theta) + std_dt * W[:, t]
 
@@ -129,6 +130,9 @@ test_summary = OU_summary_hand(ou_process([10,11]))
 
 ### SBI implementation/training
 
+#set the simulation number
+sim_num = 300000
+
 ## Defining the prior
 num_dim = 2
 prior = utils.BoxUniform(low=0 * torch.ones(num_dim), high=5 * torch.ones(num_dim))
@@ -140,6 +144,8 @@ simulator_wrapper, prior = prepare_for_sbi(OU_summary_hand, prior)
 
 #generate an observation
 observation = OU_summary_hand([1, 1])
+observation2 = OU_summary_hand([2,3])
+observation3 = OU_summary_hand([4,1])
 
 # For teting purposes, check if our simulator is consistent with expectations
 plt.plot(observation)
@@ -163,14 +169,15 @@ inference = SNPE(prior=prior, density_estimator=neural_posterior)
 
 
 #Sample the parameters from out simulator
-a, b = simulate_for_sbi(simulator_wrapper, prior, num_simulations=50000)
+a, b = simulate_for_sbi(simulator_wrapper, prior, num_simulations=sim_num)
 
+torch.save((a,b), f'./Models/OU_samples_{sim_num}')
 
 #Give the simulator our parameters
 inference = inference.append_simulations(a, b)
 
 #train the neural network
-density_estimator = inference.train()
+density_estimator = inference.train(stop_after_epochs=100)
 
 #save our model
 torch.save(density_estimator, './Models/test_save')
@@ -182,7 +189,7 @@ posterior = inference.build_posterior(density_estimator)
 
 
 #sample from our posterior
-posterior_samples = posterior.sample((10000,), x=observation)
+posterior_samples = posterior.sample((50000,), x=observation)
 
 
 ### Graphing Stuff
@@ -194,7 +201,34 @@ post_graph = analysis.pairplot(
     points_offdiag={"markersize": 6},
     figsize=(6, 6)
 )
-plt.savefig("plt_graph_111_summary_3_nonn.png")
+plt.savefig(f"plt_graph_111_summary_3_nonn_{sim_num}.png")
+
+posterior_samples2 = posterior.sample((50000,), x=observation2)
+
+
+### Graphing Stuff
+post_graph = analysis.pairplot(
+    posterior_samples2,
+    points=torch.tensor([2, 3]),
+    limits=[[0, 5], [0, 5]], 
+    points_colors="r",
+    points_offdiag={"markersize": 6},
+    figsize=(6, 6)
+)
+plt.savefig(f"plt_graph_23_summary_3_nonn_{sim_num}.png")
+
+posterior_samples3 = posterior.sample((50000,), x=observation3)
+
+### Graphing Stuff
+post_graph = analysis.pairplot(
+    posterior_samples3,
+    points=torch.tensor([4, 1]),
+    limits=[[0, 5], [0, 5]], 
+    points_colors="r",
+    points_offdiag={"markersize": 6},
+    figsize=(6, 6)
+)
+plt.savefig(f"plt_graph_41_summary_3_nonn_{sim_num}.png")
 
 ''' Debugging Code
 # List the methods of the object using dir()
