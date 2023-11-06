@@ -1,3 +1,5 @@
+using Lux, Optimisers, Random, Zygote
+
 #= Example Loss function, commented out since only used as reference
 
 
@@ -12,6 +14,8 @@ function loss_function(model, ps, st, data)
 end
 =#
 
+
+
 function mod_loss_function(y_pred, data)
     n = div(length(y_pred) , 2)
     half1 = @view  ypred[1:n]
@@ -20,3 +24,23 @@ function mod_loss_function(y_pred, data)
     negloglike = sum(negloglike)
     print(negloglike)
 end
+
+
+
+# for lux.jl loss function needts to take 4 parameter,  and return 3 parameters
+
+# input: model, parameters, states and data.
+
+# output: loss, updated_state, and any computed statistics
+
+function lux_gaussian_made_loss(model, ps, st, data)
+    y_pred, st = Lux.apply(model, data, ps, st)
+    loss = mod_loss_function(y_pred, data)
+    return loss, st, ()
+end
+
+
+
+
+
+
