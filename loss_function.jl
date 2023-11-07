@@ -17,9 +17,10 @@ end
 
 
 function mod_loss_function(y_pred, data)
+    # print(size(y_pred),size(data))
     n = div(size(y_pred)[1], 2)
     half1 = @view  y_pred[1:n,:]
-    half2 = @view y_pred[n+1:end]
+    half2 = @view y_pred[n+1:end,:]
     negloglike = (0.5).*(((data) .- half1)./half2).^2 .+ log.(half2.*sqrt(2*pi))
     negloglike = sum(negloglike)
     print(negloglike)
