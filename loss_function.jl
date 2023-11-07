@@ -26,6 +26,17 @@ function mod_loss_function(y_pred, data)
     print(negloglike)
 end
 
+function log_std_loss(y_pred, data)
+    # print(size(y_pred),size(data))
+    n = div(size(y_pred)[1], 2)
+    half1 = @view  y_pred[1:n,:]
+    half2 = @view y_pred[n+1:end,:]
+    u = (data-half1).*exp.(half2)
+    negloglike = 0.5*log(2*pi) .+ 0.5.*u.^2
+    negloglike = sum(negloglike)
+    print(negloglike)
+end
+
 
 
 # for lux.jl loss function needts to take 4 parameter,  and return 3 parameters
