@@ -31,5 +31,18 @@ end
 dev_cpu = cpu_device()
 dev_gpu = gpu_device()
 
-tstate = main(tstate, vjp_rule, gen_data, 50000)
+tstate = main(tstate, vjp_rule, gen_data, 5000)
 y_pred = dev_cpu(Lux.apply(tstate.model, gen_data, tstate.parameters, tstate.states)[1])
+# test loss compared to true values
+
+
+#y_true = repeat([2;5;9;0;0;0], 1, 10000)
+#test_loss = log_std_loss(y_true, gen_data)
+
+#=
+
+y_true2 = repeat([2;5;9;-15;-10;-6], 1, 1000)
+test_loss2 = log_std_loss(y_true2, gen_data)
+
+print(test_loss,"   ",test_loss2)
+=#
