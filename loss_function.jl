@@ -1,4 +1,4 @@
-using Lux, Optimisers, Random, Zygote
+using Lux, Optimisers, Random, Zygote, LinearA
 
 #= Example Loss function, commented out since only used as reference
 
@@ -23,6 +23,12 @@ function mod_loss_function(y_pred, data)
     half2 = @view y_pred[n+1:end,:]
     negloglike = (0.5).*(((data) .- half1)./half2).^2 .+ log.(half2.*sqrt(2*pi))
     negloglike = sum(negloglike)
+    print(negloge(y_pred),size(data))
+    n = div(size(y_pred)[1], 2)
+    half1 = @view  y_pred[1:n,:]
+    half2 = @view y_pred[n+1:end,:]
+    negloglike = (0.5).*(((data) .- half1)./half2).^2 .+ log.(half2.*sqrt(2*pi))
+    negloglike = sum(negloglike)
     print(negloglike)
 end
 
@@ -33,6 +39,7 @@ function log_std_loss(y_pred, data)
     half2 = @view y_pred[n+1:end,:]
     u = (data.-half1).*exp.(-half2)
     negloglike = 0.5*log(2*pi) .+ 0.5.*(u.^2) .+ half2
+    negloglike = mean(negloglike, dims=2)
     negloglike = sum(negloglike)
     return negloglike
 end

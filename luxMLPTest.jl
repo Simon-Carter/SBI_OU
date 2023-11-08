@@ -1,4 +1,4 @@
-using Lux, Optimisers, Random, Zygote, ADTypes
+using Lux, Optimisers, Random, Zygote, ADTypes, LinearAlgebra
 
 include("loss_function.jl")
 include("./TestingScripts/test_data_gen.jl")
@@ -11,9 +11,11 @@ Random.seed!(rng, 12345)
 opt = Adam(0.03f0)
 
 # st the architecture of the neural network
-model = Chain(Dense(3 => 4, relu), Dense(4 => 6))
+model = Chain(Dense(3 => 4, relu), Dense(4 => 5, relu), Dense(5 => 6))
 
 tstate = Lux.Training.TrainState(rng, model, opt);
+
+gen_data = gen_data_fun([1,2,3], 0.005*I(3), 1000)
 
 vjp_rule = Lux.Training.AutoZygote()
 ADTypes.AutoZygote()
@@ -31,12 +33,14 @@ end
 dev_cpu = cpu_device()
 dev_gpu = gpu_device()
 
-tstate = main(tstate, vjp_rule, gen_data, 5000)
+
+
+tstate = main(tstate, vjp_rule, gen_data, 900)
 y_pred = dev_cpu(Lux.apply(tstate.model, gen_data, tstate.parameters, tstate.states)[1])
 # test loss compared to true values
 
 
-#y_true = repeat([2;5;9;0;0;0], 1, 10000)
+#y_true = repeat([3;5;9;0;0;0], 1, 100000)
 #test_loss = log_std_loss(y_true, gen_data)
 
 #=
