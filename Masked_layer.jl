@@ -41,7 +41,6 @@ Create a traditional fully connected layer, whose forward pass is given by:
   out_dims::Int
   init_weight
   init_bias
-  mask
 end
 
 function Base.show(io::IO, d::MaskedLinear)
@@ -50,7 +49,9 @@ function Base.show(io::IO, d::MaskedLinear)
 end
 
 function MaskedLinear(mapping::Pair{<:Int, <:Int}; kwargs...)
-  return Dense(first(mapping), last(mapping); kwargs...)
+  print("Masked_linear construcot called")
+  println(kwargs...)
+  return MaskedLinear(first(mapping), last(mapping); kwargs...)
 end
 
 function MaskedLinear(in_dims::Int, out_dims::Int; init_weight=glorot_uniform,
@@ -58,17 +59,19 @@ function MaskedLinear(in_dims::Int, out_dims::Int; init_weight=glorot_uniform,
     return MaskedLinear(in_dims, out_dims, init_weight, init_bias)
 end
 
-function initialparameters(rng::AbstractRNG, d::MaskedLinear)
+function Lux.initialparameters(rng::AbstractRNG, d::MaskedLinear)
+    print("hi")
     return (weight=d.init_weight(rng, d.out_dims, d.in_dims),
         bias=d.init_bias(rng, d.out_dims, 1))
 end
 
-function parameterlength(d::MaskedLinear)
+function Lux.parameterlength(d::MaskedLinear)
     return d.out_dims * (d.in_dims + 1)
 end
 
-statelength(d::MaskedLinear) = 0
+Lux.statelength(d::MaskedLinear) = 0
 
 @inline function (d::MaskedLinear)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    return ps.weight * x + ps.bias, st
+    println("test")
+    return ps.weight*x .+ ps.bias, st
 end
