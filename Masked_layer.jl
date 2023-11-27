@@ -41,6 +41,7 @@ Create a traditional fully connected layer, whose forward pass is given by:
   out_dims::Int
   init_weight
   init_bias
+  init_mask
 end
 
 function Base.show(io::IO, d::MaskedLinear)
@@ -56,7 +57,8 @@ end
 
 function MaskedLinear(in_dims::Int, out_dims::Int; init_weight=glorot_uniform,
         init_bias=zeros32)
-    return MaskedLinear(in_dims, out_dims, init_weight, init_bias)
+        init_mask=ones(Float32, out_dims, in_dims)
+  return MaskedLinear(in_dims, out_dims, init_weight, init_bias, init_mask)
 end
 
 function Lux.initialparameters(rng::AbstractRNG, d::MaskedLinear)
@@ -72,6 +74,55 @@ end
 Lux.statelength(d::MaskedLinear) = 0
 
 @inline function (d::MaskedLinear)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    println("test")
-    return ps.weight*x .+ ps.bias, st
+    return ((d.init_mask').*ps.weight)*x .+ ps.bias, st
 end
+
+
+
+
+# stuff
+
+struct MADE{T <: NamedTuple} <: AbstractExplicitContainerLayer{(:layers,)}
+  layers::T
+  mask
+end
+
+function generate_m_k(layers)
+  dims = [(i.in_dims, i.out_dims) for i in layers]
+
+  D = dims[1][1]
+
+  integer_assign = []
+  push!(integer_assign,1:D)
+  for i in dims[1:end-1]
+    push!(integer_assign, rand(1:D-1, i[2]))
+  end
+  push!(integer_assign,1:D)
+
+  return(integer_assign)
+end
+
+function generate_masks(m_k)
+  Masks = []
+  for i in eachindex(m_k[1:end-2]) 
+    pair = collect(Iterators.product(m_k[i], m_k[i+1]))
+    M = zeros(size(pair))
+    foreach(i -> pair[i][1] > pair[i][2] ?  M[i] = 0 : M[i] = 1, CartesianIndices(pair))
+    push!(Masks, M)
+  end
+
+  pair = collect(Iterators.product(m_k[end-1], m_k[end]))
+  M = zeros(size(pair))
+  foreach(i -> pair[i][1] >= pair[i][2] ?  M[i] = 0 : M[i] = 1, CartesianIndices(pair))
+  push!(Masks, M)
+
+  return(Masks)
+end
+
+function MADE(layers...)
+  names = ntuple(i -> Symbol("layer_$i"), length(layers))
+  mask =
+  return MADE(NamedTuple{names}(layers), mask)
+end
+
+MADE(; kwargs...) = MADE((; kwargs...))
