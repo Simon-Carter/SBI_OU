@@ -103,7 +103,7 @@ function generate_m_k(layers)
   return(integer_assign)
 end
 
-function generate_masks(m_k)
+function generate_masks(m_k, gaussianMADE::Bool)
   Masks = []
   for i in eachindex(m_k[1:end-2]) 
     pair = collect(Iterators.product(m_k[i], m_k[i+1]))
@@ -115,14 +115,19 @@ function generate_masks(m_k)
   pair = collect(Iterators.product(m_k[end-1], m_k[end]))
   M = zeros(size(pair))
   foreach(i -> pair[i][1] >= pair[i][2] ?  M[i] = 0 : M[i] = 1, CartesianIndices(pair))
+
+  if gaussianMADE
+    M = hcat(M,M)
+  end
+
   push!(Masks, M)
 
   return(Masks)
 end
 
-function MADE(layers...)
+function MADE(layers...; gaussianMADE::Bool=true)
   names = ntuple(i -> Symbol("layer_$i"), length(layers))
-  mask = generate_masks(generate_m_k(layers))
+  mask = generate_masks(generate_m_k(layers), gaussianMADE)
   mask_ref = Ref(mask)
   return MADE(NamedTuple{names}(layers), mask_ref)
 end
