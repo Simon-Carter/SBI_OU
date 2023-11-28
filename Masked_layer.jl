@@ -41,7 +41,7 @@ Create a traditional fully connected layer, whose forward pass is given by:
   out_dims::Int
   init_weight
   init_bias
-  init_mask
+  init_mask::Base.RefValue{Matrix{Float32}}
 end
 
 function Base.show(io::IO, d::MaskedLinear)
@@ -58,7 +58,8 @@ end
 function MaskedLinear(in_dims::Int, out_dims::Int; init_weight=glorot_uniform,
         init_bias=zeros32)
         init_mask=ones(Float32, out_dims, in_dims)
-  return MaskedLinear(in_dims, out_dims, init_weight, init_bias, init_mask)
+        init_mask_ref = Ref(init_mask)
+  return MaskedLinear(in_dims, out_dims, init_weight, init_bias, init_mask_ref)
 end
 
 function Lux.initialparameters(rng::AbstractRNG, d::MaskedLinear)
@@ -74,7 +75,7 @@ end
 Lux.statelength(d::MaskedLinear) = 0
 
 @inline function (d::MaskedLinear)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    return ((d.init_mask').*ps.weight)*x .+ ps.bias, st
+    return ((d.init_mask[]).*ps.weight)*x .+ ps.bias, st
 end
 
 
@@ -82,9 +83,9 @@ end
 
 # stuff
 
-struct MADE{T <: NamedTuple} <: AbstractExplicitContainerLayer{(:layers,)}
+struct MADE{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
   layers::T
-  mask
+  mask::Base.RefValue{}
 end
 
 function generate_m_k(layers)
@@ -121,8 +122,43 @@ end
 
 function MADE(layers...)
   names = ntuple(i -> Symbol("layer_$i"), length(layers))
-  mask =
-  return MADE(NamedTuple{names}(layers), mask)
+  mask = generate_masks(generate_m_k(layers))
+  mask_ref = Ref(mask)
+  return MADE(NamedTuple{names}(layers), mask_ref)
 end
 
+function set_mask(layer::MaskedLinear, mask)
+  layer.init_mask[] = mask'
+end
+
+(c::MADE)(x, ps, st::NamedTuple) = applyMADE(c.layers, x, ps, st, c.mask)
+
+@generated function applyMADE(layers::NamedTuple{fields}, x, ps,
+  st::NamedTuple{fields}, masks) where {fields}
+N = length(fields)
+x_symbols = vcat([:x], [gensym() for _ in 1:N])
+st_symbols = [gensym() for _ in 1:N]
+
+calls_mask = [:(set_mask(layers.$(fields[i]), $(:(masks[][$(i)])))) for i in 1:N]
+
+calls = [:(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[i]),
+  $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]))) for i in 1:N]
+
+calls = vcat(calls_mask, calls)
+push!(calls, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
+push!(calls, :(return $(x_symbols[N + 1]), st))
+return Expr(:block, calls...)
+end
+
+
 MADE(; kwargs...) = MADE((; kwargs...))
+
+#=
+#quick test of the set_mask in applyMADE
+@generated function test(layers::NamedTuple{fields}, masks) where {fields}
+  N = length(fields)
+  calls_mask = [:(set_mask(layers.$(fields[i]), $(:(masks[][$(i)])))) for i in 1:N]
+  #calls_mask = [:($(println(i))) for i in 1:N]
+  return Expr(:block, calls_mask...)
+end
+=#
