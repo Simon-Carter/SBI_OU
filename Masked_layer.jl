@@ -37,6 +37,7 @@ Create a traditional fully connected layer, whose forward pass is given by:
 - `bias`: Bias of size `(out_dims, 1)` (present if `use_bias=true`)
 """
 @concrete struct MaskedLinear <: Lux.AbstractExplicitLayer
+  activation
   in_dims::Int
   out_dims::Int
   init_weight
@@ -55,11 +56,11 @@ function MaskedLinear(mapping::Pair{<:Int, <:Int}; kwargs...)
   return MaskedLinear(first(mapping), last(mapping); kwargs...)
 end
 
-function MaskedLinear(in_dims::Int, out_dims::Int; init_weight=glorot_uniform,
+function MaskedLinear(in_dims::Int, out_dims::Int, activation=identity; init_weight=glorot_uniform,
         init_bias=zeros32)
         init_mask=ones(Float32, out_dims, in_dims)
         init_mask_ref = Ref(init_mask)
-  return MaskedLinear(in_dims, out_dims, init_weight, init_bias, init_mask_ref)
+  return MaskedLinear(activation, in_dims, out_dims, init_weight, init_bias, init_mask_ref)
 end
 
 function Lux.initialparameters(rng::AbstractRNG, d::MaskedLinear)
@@ -75,11 +76,21 @@ end
 Lux.statelength(d::MaskedLinear) = 0
 
 @inline function (d::MaskedLinear)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    return ((d.init_mask[]).*ps.weight)*x .+ ps.bias, st
+    return d.activation.(((d.init_mask[]).*ps.weight)*x .+ ps.bias), st
 end
 
 
-
+function sample(T::MADE, ps, st)
+  input = T.layers[1].in_dims
+  samples = rand(input)
+  println(samples)
+  for i in 2:input
+    mean = T(samples, ps, st)[1][i]
+    std = exp(T(samples, ps, st)[1][i+input])
+    samples[i] = std*rand() + mean
+  end
+  return samples
+end
 
 # stuff
 
@@ -103,13 +114,15 @@ function generate_m_k(layers)
   return(integer_assign)
 end
 
+
+#Calculate masks and push 
 function generate_masks(m_k, gaussianMADE::Bool)
   Masks = []
   for i in eachindex(m_k[1:end-2]) 
     pair = collect(Iterators.product(m_k[i], m_k[i+1]))
     M = zeros(size(pair))
     foreach(i -> pair[i][1] > pair[i][2] ?  M[i] = 0 : M[i] = 1, CartesianIndices(pair))
-    push!(Masks, M)
+    push!(Masks, M')
   end
 
   pair = collect(Iterators.product(m_k[end-1], m_k[end]))
@@ -120,7 +133,7 @@ function generate_masks(m_k, gaussianMADE::Bool)
     M = hcat(M,M)
   end
 
-  push!(Masks, M)
+  push!(Masks, M')
 
   return(Masks)
 end
@@ -129,11 +142,16 @@ function MADE(layers...; gaussianMADE::Bool=true)
   names = ntuple(i -> Symbol("layer_$i"), length(layers))
   mask = generate_masks(generate_m_k(layers), gaussianMADE)
   mask_ref = Ref(mask)
+
+  for i in eachindex(layers)
+    set_mask(layers[i],mask[i])
+  end
+
   return MADE(NamedTuple{names}(layers), mask_ref)
 end
 
 function set_mask(layer::MaskedLinear, mask)
-  layer.init_mask[] = mask'
+  layer.init_mask[] = mask
 end
 
 (c::MADE)(x, ps, st::NamedTuple) = applyMADE(c.layers, x, ps, st, c.mask)
@@ -144,12 +162,12 @@ N = length(fields)
 x_symbols = vcat([:x], [gensym() for _ in 1:N])
 st_symbols = [gensym() for _ in 1:N]
 
-calls_mask = [:(set_mask(layers.$(fields[i]), $(:(masks[][$(i)])))) for i in 1:N]
+#calls_mask = [:(set_mask(layers.$(fields[i]), $(:(masks[][$(i)])))) for i in 1:N]
 
 calls = [:(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[i]),
   $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]))) for i in 1:N]
 
-calls = vcat(calls_mask, calls)
+#calls = vcat(calls_mask, calls)
 push!(calls, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
 push!(calls, :(return $(x_symbols[N + 1]), st))
 return Expr(:block, calls...)
