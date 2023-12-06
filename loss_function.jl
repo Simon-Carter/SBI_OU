@@ -1,46 +1,19 @@
-using Lux, Optimisers, Random, Zygote, LinearA
-
-#= Example Loss function, commented out since only used as reference
-
-
-function loss_function(model, ps, st, data)
-    y_pred, st = Lux.apply(model, data[1], ps, st)
-    n = length(y_pred) / 2
-    half1 = @view  ypred[1:n]
-    half2 = @view ypred[n+1:end]
-    negloglike = y_pred[1:n] + 
-    mse_loss = mean(abs2, y_pred .- data[2])
-    return mse_loss, st, ()
-end
-=#
-
-
-
-function mod_loss_function(y_pred, data)
-    # print(size(y_pred),size(data))
-    n = div(size(y_pred)[1], 2)
-    half1 = @view  y_pred[1:n,:]
-    half2 = @view y_pred[n+1:end,:]
-    negloglike = (0.5).*(((data) .- half1)./half2).^2 .+ log.(half2.*sqrt(2*pi))
-    negloglike = sum(negloglike)
-    print(negloge(y_pred),size(data))
-    n = div(size(y_pred)[1], 2)
-    half1 = @view  y_pred[1:n,:]
-    half2 = @view y_pred[n+1:end,:]
-    negloglike = (0.5).*(((data) .- half1)./half2).^2 .+ log.(half2.*sqrt(2*pi))
-    negloglike = sum(negloglike)
-    print(negloglike)
-end
+using Lux, Optimisers, Random, Zygote
 
 function log_std_loss(y_pred, data)
     print(size(y_pred),size(data))
+    #print(data)
     n = div(size(y_pred)[1], 2)
     half1 = @view y_pred[1:n,:]
     half2 = @view y_pred[n+1:end,:]
+    #println(n, half1, half2)
     u = (data.-half1).*exp.(-half2)
     negloglike = 0.5*log(2*pi) .+ 0.5.*(u.^2) .+ half2
     negloglike = mean(negloglike, dims=2)
     negloglike = sum(negloglike)
+    if (negloglike == Inf) 
+        DomainError(val) 
+    end
     return negloglike
 end
 
