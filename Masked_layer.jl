@@ -86,14 +86,13 @@ struct MADE{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
   mask::Base.RefValue{}
 end
 
-function sample(T::MADE, ps, st)
+function sample(T::MADE, ps, st; samples = rand(T.layers[1].in_dims))
   input = T.layers[1].in_dims
-  samples = rand(input)
   println(samples)
   for i in 1:input
     mean = T(samples, ps, st)[1][i]
     std = exp(T(samples, ps, st)[1][i+input])
-    samples[i] = std*rand() + mean
+    samples[i] = std*samples[i] + mean
   end
   return samples
 end
@@ -222,6 +221,16 @@ calls[2:2:n] .= calls2
 push!(calls, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
 push!(calls, :(return $(x_symbols[N + 1]), st))
 return Expr(:block, calls...)
+end
+
+
+#placeholder
+function sample(T::MAF, ps, st)
+  _sample = rand(T.layers[1].layers[1].in_dims)
+  for i in reverse(eachindex(T.layers))
+    _sample = sample(T.layers[i], ps[i], st[i], samples = _sample)
+  end
+  return _sample
 end
 
 
