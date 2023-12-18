@@ -86,7 +86,7 @@ struct MADE{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
   mask::Base.RefValue{}
 end
 
-function sample(T::MADE, ps, st; samples = rand(T.layers[1].in_dims))
+function sample(T::MADE, ps, st; samples = randn(T.layers[1].in_dims))
   input = T.layers[1].in_dims
   println(samples)
   for i in 1:input
@@ -177,10 +177,6 @@ MADE(; kwargs...) = MADE((; kwargs...))
 
 
 
-
-
-
-
 # MAF layer (chain of MADE)
 
 
@@ -209,7 +205,7 @@ x_symbols = vcat([:x], [gensym() for _ in 1:N])
 st_symbols = [gensym() for _ in 1:N]
 calls1 = [:(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[i]),
   $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]))) for i in 1:N]
-calls2 = [:($(x_symbols[i]) = coord_transform($(x_symbols[i-1]),$(x_symbols[i]))) for i in 2:N+1]
+calls2 = [:($(x_symbols[i]) = coord_transform($(x_symbols[i-1]),$(x_symbols[i]))) for i in 2:N]
 
 
 n = length(calls1) + length(calls2)
@@ -226,7 +222,7 @@ end
 
 #placeholder
 function sample(T::MAF, ps, st)
-  _sample = rand(T.layers[1].layers[1].in_dims)
+  _sample = randn(T.layers[1].layers[1].in_dims)
   for i in reverse(eachindex(T.layers))
     _sample = sample(T.layers[i], ps[i], st[i], samples = _sample)
   end
