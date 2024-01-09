@@ -56,6 +56,8 @@ function MaskedLinear(mapping::Pair{<:Int, <:Int}; kwargs...)
   return MaskedLinear(first(mapping), last(mapping); kwargs...)
 end
 
+# added a mak to the constructor
+#used a reference since it needs to be mutable, and that cant happen with direct storage in a concrete structure
 function MaskedLinear(in_dims::Int, out_dims::Int, activation=identity; init_weight=glorot_uniform,
         init_bias=zeros32)
         init_mask=ones(Float32, out_dims, in_dims)
@@ -64,7 +66,6 @@ function MaskedLinear(in_dims::Int, out_dims::Int, activation=identity; init_wei
 end
 
 function Lux.initialparameters(rng::AbstractRNG, d::MaskedLinear)
-    print("hi")
     return (weight=d.init_weight(rng, d.out_dims, d.in_dims),
         bias=d.init_bias(rng, d.out_dims, 1))
 end
@@ -73,19 +74,28 @@ function Lux.parameterlength(d::MaskedLinear)
     return d.out_dims * (d.in_dims + 1)
 end
 
+# good for efficiency not exactly sure why yet
 Lux.statelength(d::MaskedLinear) = 0
 
+
+# modified standard dense layer to implement the mask value pointed to by the pointer
 @inline function (d::MaskedLinear)(x::AbstractVecOrMat, ps, st::NamedTuple)
     return d.activation.(((d.init_mask[]).*ps.weight)*x .+ ps.bias), st
 end
 
-# stuff
 
+# -------------------------------------------------------------------
+# MADE Container Layer
+
+
+# TODO GIve a more detailed comment on this layer onsistent with the others
+# MADE container - containter of MaskedLinear Layers (implemented as a Guassian Made)
 struct MADE{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
   layers::T
   mask::Base.RefValue{}
 end
 
+# Implements the sample function to sample from the distribution represented by the MADE container
 function sample(T::MADE, ps, st; samples = randn(T.layers[1].in_dims))
   input = T.layers[1].in_dims
   println(samples)
@@ -98,6 +108,8 @@ function sample(T::MADE, ps, st; samples = randn(T.layers[1].in_dims))
 end
 
 
+#Generates a seet of integers for a layer consistent with the autoregressive property
+#used to calculate the mask
 function generate_m_k(layers)
   dims = [(i.in_dims, i.out_dims) for i in layers]
 
@@ -114,7 +126,8 @@ function generate_m_k(layers)
 end
 
 
-#Calculate masks and push 
+#Calculate masks for each layer and pushes them to an array in order to be sent to the layer
+#gaussianMADE only one implemented 
 function generate_masks(m_k, gaussianMADE::Bool)
   Masks = []
   for i in eachindex(m_k[1:end-2]) 
@@ -137,6 +150,9 @@ function generate_masks(m_k, gaussianMADE::Bool)
   return(Masks)
 end
 
+
+#Constructor for the MADE layer
+# sets initial mask
 function MADE(layers...; gaussianMADE::Bool=true)
   names = ntuple(i -> Symbol("layer_$i"), length(layers))
   mask = generate_masks(generate_m_k(layers), gaussianMADE)
@@ -149,24 +165,24 @@ function MADE(layers...; gaussianMADE::Bool=true)
   return MADE(NamedTuple{names}(layers), mask_ref)
 end
 
+# Just Sets Mask for a particular layer
 function set_mask(layer::MaskedLinear, mask)
   layer.init_mask[] = mask
 end
 
 (c::MADE)(x, ps, st::NamedTuple) = applyMADE(c.layers, x, ps, st, c.mask)
 
+#TODO Figure out why these generated funtions are used, probably for optimization reasons
+# essentially just the forward pass
 @generated function applyMADE(layers::NamedTuple{fields}, x, ps,
   st::NamedTuple{fields}, masks) where {fields}
 N = length(fields)
 x_symbols = vcat([:x], [gensym() for _ in 1:N])
 st_symbols = [gensym() for _ in 1:N]
 
-#calls_mask = [:(set_mask(layers.$(fields[i]), $(:(masks[][$(i)])))) for i in 1:N]
-
 calls = [:(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[i]),
   $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]))) for i in 1:N]
 
-#calls = vcat(calls_mask, calls)
 push!(calls, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
 push!(calls, :(return $(x_symbols[N + 1]), st))
 return Expr(:block, calls...)
@@ -176,7 +192,7 @@ end
 MADE(; kwargs...) = MADE((; kwargs...))
 
 
-
+#-------------------------------------------------------------------------------------------------------------
 # MAF layer (chain of MADE)
 
 
@@ -191,6 +207,8 @@ end
 
 (c::MAF)(x, ps, st::NamedTuple) = applyMAF(c.layers, x, ps, st)
 
+# simple macro that transforms x to there correspoding random variable representation
+#used in the flow part of Masked autoregressive flow
 @inline function coord_transform(x, y_pred)
     n = div(size(y_pred)[1], 2)
     half1 = @view y_pred[1:n,:]
@@ -198,6 +216,8 @@ end
   return (x .- half1).*exp.(-half2)
 end
 
+# forward pass, use the coord transform
+# TODO Test this and make sure its not causing the bug that keeps coming up
 @generated function applyMAF(layers::NamedTuple{fields}, x, ps,
   st::NamedTuple{fields}) where {fields}
 N = length(fields)
