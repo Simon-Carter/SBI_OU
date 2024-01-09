@@ -240,27 +240,12 @@ return Expr(:block, calls...)
 end
 
 
-#placeholder
+#The sample function for the MAF
+#TODO Also needs to verify this is not causing the bug
 function sample(T::MAF, ps, st)
   _sample = randn(T.layers[1].layers[1].in_dims)
   for i in reverse(eachindex(T.layers))
     _sample = sample(T.layers[i], ps[i], st[i], samples = _sample)
   end
   return _sample
-end
-
-
-
-#=
-#quick test of the set_mask in applyMADE
-@generated function test(layers::NamedTuple{fields}, masks) where {fields}
-  N = length(fields)
-  calls_mask = [:(set_mask(layers.$(fields[i]), $(:(masks[][$(i)])))) for i in 1:N]
-  #calls_mask = [:($(println(i))) for i in 1:N]
-  return Expr(:block, calls_mask...)
-end
-=#
-
-@generated function test()
-  return :(coord_transform($,$))
 end
