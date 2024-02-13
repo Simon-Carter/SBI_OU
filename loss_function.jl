@@ -17,6 +17,34 @@ function log_std_loss(y_pred, data)
     return negloglike
 end
 
+function log_std_loss2(y_pred, data, extra)
+    sum_output = sum(extra)
+    print(size(y_pred),size(data))
+    #print(data)
+    n = div(size(y_pred)[1], 2)
+    half1 = @view y_pred[1:n,:]
+    half2 = @view y_pred[n+1:end,:]
+
+    half2_all = @view sum_output[n+1:end,:]
+    #println(n, half1, half2)
+    u = (data.-half1).*exp.(-half2)
+    negloglike = 0.5*log(2*pi) .+ 0.5.*(u.^2) .+ half2_all
+    negloglike = mean(negloglike, dims=2)
+    negloglike = sum(negloglike)
+    if (negloglike == Inf) 
+        DomainError(val) 
+    end
+    return negloglike
+end
+
+function log_MAF_loss(u)
+    n = length(u)
+    mu = (1/n)*sum(u)
+    sigma = (1/n)*sum((mu .- u).^2)
+
+    return (mu^2 + (sigma -1)^2)
+end
+
 
 # for lux.jl loss function needts to take 4 parameter,  and return 3 parameters
 
@@ -30,6 +58,14 @@ function lux_gaussian_made_loss(model, ps, st, data)
     return loss, st, ()
 end
 
+function lux_gaussian_maf_loss(model, ps, st, data)
+    y, st, x1, x2...  = Lux.apply(model, data, ps, st)
+    #println(x1)
+    #println(size(x2))
+    println("hi")
+    loss = log_std_loss2(y, x1, x2) #TODO double check this
+    return loss, st, ()
+end
 
 
 

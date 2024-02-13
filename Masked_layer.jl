@@ -213,29 +213,43 @@ end
     n = div(size(y_pred)[1], 2)
     half1 = @view y_pred[1:n,:]
     half2 = @view y_pred[n+1:end,:]
-  return (x .- half1).*exp.(-half2)
+    println(x[:,1])
+    println(half1[:,1], half2[:,1], y_pred[:,1])
+    u = (x .- half1).*exp.(-half2)
+    println(u[:,1])
+  return u
 end
 
 # forward pass, use the coord transform
 # TODO Test this and make sure its not causing the bug that keeps coming up
 @generated function applyMAF(layers::NamedTuple{fields}, x, ps,
   st::NamedTuple{fields}) where {fields}
-N = length(fields)
+N = length(fields) #number of MADE layers
 x_symbols = vcat([:x], [gensym() for _ in 1:N])
+total_std = [gensym() for _ in 1:N]
 st_symbols = [gensym() for _ in 1:N]
 calls1 = [:(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[i]),
   $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]))) for i in 1:N]
 calls2 = [:($(x_symbols[i]) = coord_transform($(x_symbols[i-1]),$(x_symbols[i]))) for i in 2:N]
+calls3 = [:($(total_std[i]) = copy($(x_symbols[i+1]))) for i in 1:N]
 
 
-n = length(calls1) + length(calls2)
+
+n = length(calls1) + length(calls2) + length(calls3)
 calls = similar(calls1, n)
 
-calls[1:2:n] .= calls1
-calls[2:2:n] .= calls2
+#add up all the log std for each layer
+#each_layer_ouptut = :([$(x_symbols[N]) for i in 1:N])
+
+################# add the definition of total_std as an array in the list of blocks
+#calls[1] .= :($(x_symbols[1]) = 1)
+calls[1:3:n] .= calls1
+calls[2:3:n] .= calls3
+calls[3:3:n] .= calls2
+
 
 push!(calls, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
-push!(calls, :(return $(x_symbols[N + 1]), st))
+push!(calls, :(return $(x_symbols[N + 1]), st, $(x_symbols[N]), $(total_std...)))
 return Expr(:block, calls...)
 end
 
