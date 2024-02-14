@@ -1,3 +1,5 @@
+using Random
+
 
 """
     Dense(in_dims => out_dims, activation=identity; init_weight=glorot_uniform,
@@ -93,13 +95,15 @@ end
 struct MADE{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
   layers::T
   mask::Base.RefValue{}
+  order::AbstractArray{Int}
 end
 
 # Implements the sample function to sample from the distribution represented by the MADE container
 function sample(T::MADE, ps, st; samples = randn(T.layers[1].in_dims))
   input = T.layers[1].in_dims
+  order = sortperm(T.order) # gets the index for the m_k values in increasing order
   println(samples)
-  for i in 1:input
+  for i in order
     mean = T(samples, ps, st)[1][i]
     std = exp(T(samples, ps, st)[1][i+input])
     samples[i] = std*samples[i] + mean
@@ -110,17 +114,22 @@ end
 
 #Generates a seet of integers for a layer consistent with the autoregressive property
 #used to calculate the mask
-function generate_m_k(layers)
+function generate_m_k(layers, random_order::Bool)
   dims = [(i.in_dims, i.out_dims) for i in layers]
 
   D = dims[1][1]
 
   integer_assign = []
-  push!(integer_assign,1:D)
-  for i in dims[1:end-1]
-    push!(integer_assign, rand(1:D-1, i[2]))
+  if random_order
+    push!(integer_assign, randperm(D))
+  else
+    push!(integer_assign,1:D)
   end
-  push!(integer_assign,1:D)
+
+  for i in dims[1:end-1]
+    push!(integer_assign, rand(1:D-1, i[2])) #TODO double check the integer assign is working
+  end
+  push!(integer_assign,integer_assign[1])
 
   return(integer_assign)
 end
@@ -153,16 +162,21 @@ end
 
 #Constructor for the MADE layer
 # sets initial mask
-function MADE(layers...; gaussianMADE::Bool=true)
+function MADE(layers...; gaussianMADE::Bool=true, random_order::Bool=false)
   names = ntuple(i -> Symbol("layer_$i"), length(layers))
-  mask = generate_masks(generate_m_k(layers), gaussianMADE)
+
+  m_k = generate_m_k(layers, random_order)
+
+  order = m_k[1]
+
+  mask = generate_masks(m_k, gaussianMADE)
   mask_ref = Ref(mask)
 
   for i in eachindex(layers)
     set_mask(layers[i],mask[i])
   end
 
-  return MADE(NamedTuple{names}(layers), mask_ref)
+  return MADE(NamedTuple{names}(layers), mask_ref, order)
 end
 
 # Just Sets Mask for a particular layer
