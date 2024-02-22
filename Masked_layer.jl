@@ -114,10 +114,11 @@ end
 
 #Generates a seet of integers for a layer consistent with the autoregressive property
 #used to calculate the mask
-function generate_m_k(layers, random_order::Bool)
+function generate_m_k(layers, random_order::Bool; num_conditional=0)
   dims = [(i.in_dims, i.out_dims) for i in layers]
 
   D = dims[1][1]
+  D = D - num_conditional
 
   integer_assign = []
   if random_order
@@ -130,6 +131,8 @@ function generate_m_k(layers, random_order::Bool)
     push!(integer_assign, rand(1:D-1, i[2])) #TODO double check the integer assign is working
   end
   push!(integer_assign,integer_assign[1])
+
+  integer_assign[1] = vcat(integer_assign[1], ones(num_conditional))
 
   return(integer_assign)
 end
@@ -206,6 +209,79 @@ end
 MADE(; kwargs...) = MADE((; kwargs...))
 
 
+
+#-------------------------------------------------------------------------------------------------------------
+
+# MADE conditional Container Layer
+
+
+# TODO GIve a more detailed comment on this layer onsistent with the others
+# MADE container - containter of MaskedLinear Layers (implemented as a Guassian Made)
+
+struct conditional_MADE{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
+  layers::T
+  mask::Base.RefValue{}
+  order::AbstractArray{Int}
+  num_conditional::Int
+end
+
+function sample(T::conditional_MADE, ps, st; samples = randn(T.layers[1].in_dims))
+  input = T.layers[1].in_dims
+  order = sortperm(T.order) # gets the index for the m_k values in increasing order
+  for i in order
+    mean = T(samples, ps, st)[1][i]
+    std = exp(T(samples, ps, st)[1][i+input])
+    samples[i] = std*samples[i] + mean
+  end
+  return samples
+end
+
+
+#Constructor for the MADE layer
+# sets initial mask
+function conditional_MADE(layers...; gaussianMADE::Bool=true, random_order::Bool=false)
+  names = ntuple(i -> Symbol("layer_$i"), length(layers))
+
+  input_size = layers[1].in_dims
+  output_size = layers[end].out_dims
+
+  num_conditional = int(input_size - (output_size / 2))
+
+  m_k = generate_m_k(layers, random_order, num_conditional=num_conditional)
+
+  order = m_k[1]
+
+  mask = generate_masks(m_k, gaussianMADE)
+  mask_ref = Ref(mask)
+
+  for i in eachindex(layers)
+    set_mask(layers[i],mask[i])
+  end
+
+  return conditional_MADE(NamedTuple{names}(layers), mask_ref, order, num_conditional)
+end
+
+(c::conditional_MADE)(x, ps, st::NamedTuple) = apply_conditionalMADE(c.layers, x, ps, st, c.mask)
+
+#TODO Figure out why these generated funtions are used, probably for optimization reasons
+# essentially just the forward pass
+@generated function apply_conditionalMADE(layers::NamedTuple{fields}, x, ps,
+  st::NamedTuple{fields}, masks) where {fields}
+N = length(fields)
+x_symbols = vcat([:x], [gensym() for _ in 1:N])
+st_symbols = [gensym() for _ in 1:N]
+
+calls = [:(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[i]),
+  $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]))) for i in 1:N]
+
+push!(calls, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
+push!(calls, :(return $(x_symbols[N + 1]), st))
+return Expr(:block, calls...)
+end
+
+
+conditional_MADE(; kwargs...) = conditional_MADE((; kwargs...))
+
 #-------------------------------------------------------------------------------------------------------------
 # MAF layer (chain of MADE)
 
@@ -271,6 +347,79 @@ end
 #The sample function for the MAF
 #TODO Also needs to verify this is not causing the bug
 function sample(T::MAF, ps, st)
+  _sample = randn(T.layers[1].layers[1].in_dims)
+  for i in reverse(eachindex(T.layers))
+    _sample = sample(T.layers[i], ps[i], st[i], samples = _sample)
+  end
+  return _sample
+end
+
+#-------------------------------------------------------------------------------------------------------------
+# conditional MAF layer (chain of MADE with the conditional flag set to true)
+
+
+struct conditional_MAF{T <: NamedTuple} <: Lux.AbstractExplicitContainerLayer{(:layers,)}
+  layers::T
+  conditional_num::Int
+end
+
+function conditional_MAF(layers...; conditional_num = 0)
+  names = ntuple(i -> Symbol("MADE_$i"), length(layers))
+  return conditional_MAF(NamedTuple{names}(layers), conditional_num)
+end
+
+(c::conditional_MAF)(x, ps, st::NamedTuple) = applyconditional_MAF(c.layers, x[1:end-c.conditional_num,:], ps, st, x[end-c.conditional_num+1:end,:])
+
+@generated function applyconditional_MAF(layers::NamedTuple{fields}, x, ps,
+  st::NamedTuple{fields}, conditionals) where {fields}
+N = length(fields) #number of MADE layers
+
+x_symbols = vcat([:x], [gensym() for _ in 1:N])
+total_std = [gensym() for _ in 1:N]
+st_symbols = [gensym() for _ in 1:N]
+calls1 = [:(($(x_symbols[i + 1]), $(st_symbols[i]), $(total_std[i])) = expr_forward(layers.$(fields[i]),
+  $(x_symbols[i]), ps.$(fields[i]), st.$(fields[i]), conditionals)) for i in 1:N]
+#calls2 = [:($(x_symbols[i]) = coord_transform($(x_symbols[i-1]),$(x_symbols[i]))) for i in 2:N]
+#=push!(calls1, :(($(x_symbols[i + 1]), $(st_symbols[i])) = Lux.apply(layers.$(fields[N]),
+$(x_symbols[N]), ps.$(fields[N]), st.$(fields[N]))))=#
+
+#add up all the log std for each layer
+#each_layer_ouptut = :([$(x_symbols[N]) for i in 1:N])
+
+################# add the definition of total_std as an array in the list of blocks
+#calls[1] .= :($(x_symbols[1]) = 1)
+
+push!(calls1, :(($(x_symbols[N + 1]), $(st_symbols[N])) = Lux.apply(layers.$(fields[N]),
+$(x_symbols[N]), ps.$(fields[N]), st.$(fields[N]))))
+push!(calls1, :($(total_std[N]) = copy($(x_symbols[N+1]))))
+push!(calls1, :(st = NamedTuple{$fields}((($(Tuple(st_symbols)...),)))))
+push!(calls1, :(return $(x_symbols[N + 1]), st, $(x_symbols[N]), $(total_std...)))
+return Expr(:block, calls1...)
+end
+
+function expr_forward(layer::MADE, input, ps, st, conditionals)
+  output, output_st  = Lux.apply(layer, input, ps,st)
+  output_pre = copy(output)
+  output = coord_transform(input, output)
+  return(output, output_st, output_pre)
+end
+
+function expr_forward(layer::BatchNorm, input, ps, st, conditionals)
+  output, output_st  = Lux.apply(layer, input, ps,st)
+  output_pre = zeros(eltype(output), size(output))
+  return(output, output_st, output_pre)
+end
+
+
+function expr_forward(layer::conditional_MADE, input, ps, st, conditionals)
+  input = vcat(input, conditionals)
+  output, output_st  = Lux.apply(layer, input, ps,st)
+  output = coord_transform(input, output)
+  return(output, output_st)
+end
+
+
+function sample(T::conditional_MAF, ps, st)
   _sample = randn(T.layers[1].layers[1].in_dims)
   for i in reverse(eachindex(T.layers))
     _sample = sample(T.layers[i], ps[i], st[i], samples = _sample)
