@@ -2,11 +2,11 @@ using Random
 
 
 """
-    Dense(in_dims => out_dims, activation=identity; init_weight=glorot_uniform,
+MaskedLinear(in_dims => out_dims, activation=identity; init_weight=glorot_uniform,
           init_bias=zeros32, bias::Bool=true)
 
-Create a traditional fully connected layer, whose forward pass is given by:
-`y = activation.(weight * x .+ bias)`
+Added a traditional mask to a traditional fully connected layer, blocking certain connections. The forward pass is given by:
+`y = activation.(weight * mask * x .+ bias)`
 
 ## Arguments
 
@@ -23,6 +23,7 @@ Create a traditional fully connected layer, whose forward pass is given by:
   - `allow_fast_activation`: If `true`, then certain activations can be approximated with
     a faster version. The new activation function will be given by
     `NNlib.fast_act(activation)`
+  - 'init_mask': Initial mask, stored as a reference to allow for dynamic masks, default, all ones (no masking)
 
 ## Input
 
@@ -423,15 +424,15 @@ function expr_forward(layer::MADE, input, ps, st, conditionals)
   return(output, output_st, output_pre)
 end
 
-#=
+
 function expr_forward(layer::BatchNorm, input, ps, st, conditionals)
-  println("A MADE LAYER FORWARD PASS WAS TRIGGERED")
+  println("A BATCH NORM FORWARD PASS WAS TRIGGERED")
   output, output_st  = Lux.apply(layer, input, ps,st)
   output_pre = copy(output)
   output = coord_transform(input, output)
   return(output, output_st, output_pre)
 end
-=#
+
 
 function expr_forward(layer::BatchNorm, input, ps, st, conditionals)
   println("A BATCH NORM LAYER FORWARD PASS WAS TRIGGERED")
@@ -454,7 +455,7 @@ function expr_forward(layer::conditional_MADE, input, ps, st, conditionals; fina
   #println("this is right before checking input full amount")
   #println(size(input_full))
   output, output_st  = Lux.apply(layer, input_full, ps, st)
-  #println("layer applied")
+  println("layer applied")
   output_pre = copy(output)
   output = coord_transform(input, output)
   #println("coord transform applied")
@@ -476,3 +477,77 @@ function sample(T::conditional_MAF, ps, st; conditional = randn(T.conditional_nu
   end
   return _sample
 end
+
+ #=
+# Custom Batch Normalization Layer modified for Masked Autoregressive flow
+@concrete struct BatchNorm_maf{affine, track_stats, N} <:
+  AbstractNormalizationLayer{affine, track_stats}
+activation
+epsilon::N
+momentum::N
+chs::IntAbstra
+init_bias
+init_scale
+end
+
+function BatchNorm_maf(chs::Int, activation=identity; init_bias=zeros32,
+init_scale=ones32, affine::Bool=true, track_stats::Bool=true,
+epsilon=1.0f-5, momentum=0.1f0, allow_fast_activation::Bool=true)
+activation = allow_fast_activation ? NNlib.fast_act(activation) : activation
+return BatchNorm{affine, track_stats}(
+activation, epsilon, momentum, chs, init_bias, init_scale)
+end
+
+function initialparameters(rng::AbstractRNG, l::BatchNorm_maf)
+if _affine(l)
+return (scale=l.init_scale(rng, l.chs), bias=l.init_bias(rng, l.chs))
+else
+return NamedTuple()
+end
+end
+
+function initialstates(rng::AbstractRNG, l::BatchNorm_maf)
+if _track_stats(l)
+return (running_mean=zeros32(rng, l.chs),
+running_var=ones32(rng, l.chs), training=Val(true))
+else
+return (; training=Val(true))
+end
+end
+
+parameterlength(l::BatchNorm_maf) = _affine(l) ? (l.chs * 2) : 0
+statelength(l::BatchNorm_maf) = (_track_stats(l) ? 2 * l.chs : 0) + 1
+
+function (BN::BatchNorm_maf)(x::AbstractArray, ps, st::NamedTuple)
+y, stats = batchnorm_maf(x, getproperty(ps, Val(:scale)), getproperty(ps, Val(:bias)),
+getproperty(st, Val(:running_mean)),
+getproperty(st, Val(:running_var)); BN.momentum, BN.epsilon, st.training)
+
+
+if _track_stats(BN)
+@set! st.running_mean = stats.running_mean
+@set! st.running_var = stats.running_var
+end
+
+return y, st
+end
+
+function Base.show(io::IO, l::BatchNorm_maf)
+print(io, "BatchNorm($(l.chs)")
+(l.activation == identity) || print(io, ", $(l.activation)")
+print(io, ", affine=$(_affine(l))")
+print(io, ", track_stats=$(_track_stats(l))")
+return print(io, ")")
+end
+
+function batchnorm_maf(x, gamma, beta, m, v, momentum, epsilon, training)
+  batch_m = mean(matrix, dims=2)
+  batch_v = var(matrix, dims=2)
+  y = (x .- batch_m) ./ sqrt(batch_v .+ epsilon) .* exp(gamma) .+ beta
+  running_mean = (m .* momentum) .+ (batch_m .* (1 - momentum))
+  running_var = (v .* momentum) .+ (batch_v .* (1 - momentum))
+  stats = (running_mean=running_mean, running_var=running_var)
+  return y, stats
+end
+
+=#
