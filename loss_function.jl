@@ -4,6 +4,9 @@ function log_std_loss(y_pred, data)
     print(size(y_pred),size(data))
     #print(data)
     n = div(size(y_pred)[1], 2)
+    data = data[1:n]
+
+
     half1 = @view y_pred[1:n,:]
     half2 = @view y_pred[n+1:end,:]
     #println(n, half1, half2)
@@ -19,7 +22,7 @@ end
 
 function log_std_loss2(y_pred, data, extra)
     sum_output = sum(extra)
-    print(size(y_pred),size(data))
+    println(size(y_pred),size(data))
     #print(data)
     n = div(size(y_pred)[1], 2)
     half1 = @view y_pred[1:n,:]
@@ -28,12 +31,15 @@ function log_std_loss2(y_pred, data, extra)
     half2_all = @view sum_output[n+1:end,:]
     #println(n, half1, half2)
     u = (data.-half1).*exp.(-half2)
+    println("This is right before I need it")
+    println(size(u), size(half2_all))
     negloglike = 0.5*log(2*pi) .+ 0.5.*(u.^2) .+ half2_all
     negloglike = mean(negloglike, dims=2)
     negloglike = sum(negloglike)
     if (negloglike == Inf) 
         DomainError(val) 
     end
+    println("about to return negloklike")
     return negloglike
 end
 
@@ -59,10 +65,10 @@ function lux_gaussian_made_loss(model, ps, st, data)
 end
 
 function lux_gaussian_maf_loss(model, ps, st, data)
+    println("loss function called")
     y, st, x1, x2...  = Lux.apply(model, data, ps, st)
     #println(x1)
     #println(size(x2))
-    println("hi")
     loss = log_std_loss2(y, x1, x2) #TODO double check this
     return loss, st, ()
 end
